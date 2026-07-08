@@ -1,97 +1,82 @@
-import { promises as fs } from 'fs';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import type { WorkOrder, CreateWorkOrderInput, UpdateWorkOrderInput } from '../types';
+import connectDB from '../mongodb';
+import WorkOrderModel from '@/models/WorkOrder';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const WORK_ORDERS_FILE = path.join(DATA_DIR, 'work-orders.json');
+import type {
+  WorkOrder,
+  CreateWorkOrderInput,
+  UpdateWorkOrderInput,
+} from '../types';
 
-// Ensure data directory exists
-async function ensureDataDir() {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-  } catch {
-    // Directory might already exist
-  }
-}
-
-// Read all work orders
-async function readWorkOrders(): Promise<WorkOrder[]> {
-  try {
-    await ensureDataDir();
-    const data = await fs.readFile(WORK_ORDERS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-// Write work orders to file
-async function writeWorkOrders(orders: WorkOrder[]): Promise<void> {
-  await ensureDataDir();
-  await fs.writeFile(WORK_ORDERS_FILE, JSON.stringify(orders, null, 2));
+function format(doc: any): WorkOrder {
+  return {
+    id: doc._id.toString(),
+    title: doc.title,
+    description: doc.description,
+    priority: doc.priority,
+    status: doc.status,
+    createdAt: doc.createdAt.toISOString(),
+    updatedAt: doc.updatedAt.toISOString(),
+  };
 }
 
 // Get all work orders
 export async function getAllWorkOrders(): Promise<WorkOrder[]> {
-  return readWorkOrders();
+  await connectDB();
+
+  const orders = await WorkOrderModel.find().sort({
+    createdAt: -1,
+  });
+
+  return orders.map(format);
 }
 
 // Get single work order
 export async function getWorkOrder(id: string): Promise<WorkOrder | null> {
-  const orders = await readWorkOrders();
-  return orders.find(order => order.id === id) || null;
+  await connectDB();
+
+  const order = await WorkOrderModel.findById(id);
+
+  if (!order) return null;
+
+  return format(order);
 }
 
 // Create work order
-export async function createWorkOrder(input: CreateWorkOrderInput): Promise<WorkOrder> {
-  const orders = await readWorkOrders();
-  const now = new Date().toISOString();
+export async function createWorkOrder(
+  input: CreateWorkOrderInput
+): Promise<WorkOrder> {
+  await connectDB();
 
-  const newOrder: WorkOrder = {
-    id: uuidv4(),
+  const order = await WorkOrderModel.create({
     ...input,
     status: 'Open',
-    createdAt: now,
-    updatedAt: now,
-  };
+  });
 
-  orders.push(newOrder);
-  await writeWorkOrders(orders);
-
-  return newOrder;
+  return format(order);
 }
 
 // Update work order
-export async function updateWorkOrder(id: string, input: UpdateWorkOrderInput): Promise<WorkOrder | null> {
-  const orders = await readWorkOrders();
-  const index = orders.findIndex(order => order.id === id);
+export async function updateWorkOrder(
+  id: string,
+  input: UpdateWorkOrderInput
+): Promise<WorkOrder | null> {
+  await connectDB();
 
-  if (index === -1) {
-    return null;
-  }
+  const order = await WorkOrderModel.findByIdAndUpdate(id, input, {
+    new: true,
+    runValidators: true,
+  });
 
-  const now = new Date().toISOString();
-  orders[index] = {
-    ...orders[index],
-    ...input,
-    updatedAt: now,
-  };
+  if (!order) return null;
 
-  await writeWorkOrders(orders);
-  return orders[index];
+  return format(order);
 }
 
 // Delete work order
 export async function deleteWorkOrder(id: string): Promise<boolean> {
-  const orders = await readWorkOrders();
-  const index = orders.findIndex(order => order.id === id);
+  await connectDB();
 
-  if (index === -1) {
-    return false;
-  }
+  const result = await WorkOrderModel.findByIdAndDelete(id);
 
-  orders.splice(index, 1);
-  await writeWorkOrders(orders);
-  return true;
+  return !!result;
 }
